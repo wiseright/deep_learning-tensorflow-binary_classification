@@ -4,4 +4,5 @@ Description: classification algorithm that checks if there is Huggy Waggy in a p
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="huggy_waggy.png">
+  <img alt="Shows an illustrated sun in light color mode and a moon with stars in dark color mode." src="huggy_waggy.png">
 </picture>
