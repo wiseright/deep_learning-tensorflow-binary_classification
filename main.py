@@ -1,85 +1,97 @@
-import random
-
 import tensorflow as tf
-from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.layers import Dense, Input, Conv2D, MaxPool2D, Flatten, Reshape, Conv2DTranspose, UpSampling2D
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.utils import to_categorical
-
-import numpy as np
+from tensorflow import keras
+from keras.preprocessing.image import ImageDataGenerator
+from keras.layers import Conv2D, Flatten, MaxPool2D, Dense
+from keras.models import Sequential
 import matplotlib.pyplot as plt
-from tensorflow.keras.datasets import mnist, fashion_mnist
+import os
+import shutil
+import random
+import scipy
+import numpy as np
 
-# Caricamento del dataset
-(X_train, y_train), (X_test, y_test) = fashion_mnist.load_data()
+# LOAD AND PROCESS IMAGES WITH IMAGEDATAGENERATOR
+DATASET_PATH = './dataset'
+TRAINING_PATH = './dataset/training'
+TESTING_PATH = './dataset/testing'
 
-# normalizzazione e reshape
-X_train = X_train / 255
-X_train = X_train.reshape(len(X_train),28,28,1)
-X_test = X_test / 255
-X_test = X_test.reshape(len(X_test),28,28,1)
+train_datagen = ImageDataGenerator(rescale=1/255)
+train_data = train_datagen.flow_from_directory(TRAINING_PATH,
+                                               target_size=(224,224),
+                                               batch_size=8,
+                                               shuffle=True,
+                                               class_mode='binary')
 
-# Plot image
-# w = 5
-# h = 5
-# fig, ax = plt.subplots(w, h)
-# ax = ax.ravel()
-# imgs, labels = next(train_data)
-# for i in range(len(ax)):
-#     idx = random.choice(np.arange(len(imgs)))
-#     ax[i].imshow(imgs[idx,:,:,0], cmap='gray')
-#     ax[i].axis('off')
-#     ax[i].set_title(labels[idx])
+test_datagen = ImageDataGenerator(rescale=1/255)
+test_data = test_datagen.flow_from_directory(TESTING_PATH,
+                                             target_size=(224,224),
+                                             batch_size=8,
+                                             shuffle=True,
+                                             class_mode='binary')
 
-# Definizione del modello CNN
+# VISUALIZING LOADED IMAGES
+print(train_data.class_indices)
+imgs, labels = next(train_data)
+fig, ax = plt.subplots(2,4)
+ax = ax.ravel()
+name_classes = list(train_data.class_indices.keys())
+for i in range(8):
+    ax[i].imshow(imgs[i,:,:,:])
+    label = int(labels[i])
+    title_name = name_classes[label]
+    ax[i].set_title(title_name)
+    ax[i].axis('off')
+
+# CREATING THE CNN MODEL
 model = Sequential([
-                    # Encoder
-                    Conv2D(filters=16, kernel_size=(3,3), activation='relu', input_shape=(28,28,1)),
-                    MaxPool2D(pool_size=(2,2)),
-                    Conv2D(filters=8, kernel_size=(3,3), activation='relu', padding='same'),
-                    MaxPool2D(pool_size=(2,2), padding='same'),
-                    Conv2D(filters=8, kernel_size=(3,3), activation='relu', padding='same', strides=(2,2)),
+    Conv2D(filters=16, kernel_size=(3,3), activation='relu', input_shape=(224,224,3)),
+    MaxPool2D(pool_size=(2,2)),
+    Conv2D(filters=16, kernel_size=(3,3), activation='relu'),
+    MaxPool2D(pool_size=(2,2)),
+    Conv2D(filters=8, kernel_size=(3,3), activation='relu'),
+    MaxPool2D(pool_size=(2,2)),
+    Flatten(),
+    Dense(1, activation='sigmoid')
+])
 
-                    Flatten(),
-                    # Decoder
-                    Reshape((4,4,8)),
+# DEFINE THE OPTIMIZER AND LOSS
+model.compile(
+    optimizer='Adam',
+    loss='binary_crossentropy',
+    metrics=['accuracy']
+)
 
-                    Conv2D(filters=8, kernel_size=(3,3), activation='relu', padding='same'),
-                    UpSampling2D((2,2)),
-                    Conv2D(filters=8, kernel_size=(3,3), activation='relu',padding='same'),
-                    UpSampling2D((2,2)),
-                    Conv2D(filters=16, kernel_size=(3,3), activation='relu'),
-                    UpSampling2D((2,2)),
-                    Conv2D(filters=1, kernel_size=(3,3), activation='sigmoid', padding='same')
-                    ])
+# FIT THE MODEL
+history = model.fit(
+        train_data,
+        epochs=30,
+        validation_data=test_data
+)
 
-model.compile(optimizer='Adam', loss='binary_crossentropy', metrics=['accuracy'])
-model.fit(X_train, X_train, epochs=50)
+# VISUALIZING LOSS AND ACCURACY RESULT
+plt.plot(history.history['accuracy'], label='accuracy')
+plt.plot(history.history['val_accuracy'], label='validation accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
 
-autoencoder = model
-encoder = tf.keras.models.Model(inputs = autoencoder.input,
-                                outputs = autoencoder.get_layer('flatten').output)
+# VERIFY WITH OTHER IMAGES
+path_file = './images.jpg'
+def do_prediction(path_file):
+    img = tf.io.read_file(path_file)
+    img = tf.image.decode_jpeg(img)
+    img = tf.image.resize(img, size=[224,224])
+    img = img / 255.
+    img = tf.expand_dims(img, axis=0)
+    prediction = model.predict(img)
+    predicted_num_class = int(np.round(prediction))
+    predicted_class = name_classes[predicted_num_class]
+    plt.imshow(img[0,:,:,:])
+    plt.axis('off')
+    if predicted_num_class == 0:
+        string_prediction = str(1 - prediction[0])
+    else:
+        string_prediction = str(prediction[0])
+    plt.title(predicted_class + ' with confidence= ' + str(string_prediction))
 
-decoder = tf.keras.models.Model(inputs = autoencoder.get_layer('reshape').input,
-                                outputs = autoencoder.output)
-
-coded_test_imgs = encoder.predict(X_test)
-decoded_test_imgs = decoder(coded_test_imgs)
-
-# Visualizzare 10 immagini a caso
-n_imgs = 10
-index_imgs =np.random.randint(0,X_test.shape[0],n_imgs)
-fig, ax = plt.subplots(3,n_imgs, figsize=(18,18))
-#ax = ax.ravel()
-for i, index_img in enumerate(index_imgs):
-    # Immagini originali
-    ax[0,i].imshow(X_test[index_img,:,:,0], cmap='gray')
-    ax[0,i].axis('off')
-
-    # Immagini codificate
-    ax[1, i].imshow(coded_test_imgs[index_img].reshape((16,8)), cmap='gray')
-    ax[1, i].axis('off')
-
-    # Immagini codificate
-    ax[2, i].imshow(decoded_test_imgs[index_img,:,:,0], cmap='gray')
-    ax[2, i].axis('off')
+do_prediction(path_file)
